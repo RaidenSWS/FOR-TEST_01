@@ -2997,7 +2997,7 @@ local function loadConfig()
 	if type(hub.settings.modeTeams) == "table" then
 		hub.settings.modeTeams["Fool's Hunt"] = nil
 	end
-	if hub.settings.summerMode ~= "Party" then
+	if not table.find({ "Solo", "Party", "Find Match" }, hub.settings.summerMode) then
 		hub.settings.summerMode = "Solo"
 	end
 	if hub.settings.rogueMode == "Bad first (more coins)" then
@@ -3910,6 +3910,7 @@ local eventTeam = {
 	weathers = { "rain", "windy", "snow", "fire", "sandstorm", "mana", "underwater", "downpour", "meteor_shower" },
 	weatherNames = { rain = "Rainy", windy = "Windy", snow = "Blizzard", fire = "Inferno", sandstorm = "Sandstorm", mana = "Magical", underwater = "Flooded", downpour = "Stormy", meteor_shower = "Starfall", clear = "Clear" },
 	joinRules = { "Always", "New map or weather", "New map only", "New weather only" },
+	playModes = { "Solo", "Party", "Find Match" },
 	mapNames = {},
 }
 hub.eventTeam = eventTeam
@@ -3951,7 +3952,13 @@ function eventTeam.rooms()
 end
 
 function eventTeam.inEventLobby()
+	local portals = workspace:FindFirstChild("_PORTALS")
+	local folder = portals and portals:FindFirstChild("Lobbies")
+	local list = folder and folder:GetChildren() or {}
 	for _, lobby in ipairs(eventTeam.rooms()) do
+		table.insert(list, lobby)
+	end
+	for _, lobby in ipairs(list) do
 		local level = lobby:FindFirstChild("Level")
 		if level and level:IsA("StringValue") and level.Value == eventTeam.level and eventTeam.inRoom(lobby, LocalPlayer) then
 			return true, lobby
@@ -3962,6 +3969,89 @@ end
 
 function eventTeam.party()
 	return hub.settings.autoSummerHunt == true and hub.settings.summerMode == "Party"
+end
+
+function eventTeam.partyInfo()
+	local id = LocalPlayer:GetAttribute("PartyId")
+	if id == nil or id == "" then
+		return nil
+	end
+	local members = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player:GetAttribute("PartyId") == id then
+			table.insert(members, player)
+		end
+	end
+	return { owner = tonumber(LocalPlayer:GetAttribute("PartyOwnerId")) == LocalPlayer.UserId, members = members }
+end
+
+function eventTeam.partyMember()
+	if not eventTeam.party() then
+		return false
+	end
+	local info = eventTeam.partyInfo()
+	return info ~= nil and not info.owner
+end
+
+function eventTeam.ownedRoom()
+	local portals = workspace:FindFirstChild("_PORTALS")
+	local folder = portals and portals:FindFirstChild("Lobbies")
+	local list = folder and folder:GetChildren() or {}
+	for _, lobby in ipairs(eventTeam.rooms()) do
+		table.insert(list, lobby)
+	end
+	for _, lobby in ipairs(list) do
+		local owner = lobby:FindFirstChild("Owner")
+		local level = lobby:FindFirstChild("Level")
+		if owner and owner.Value == LocalPlayer and level and level.Value == eventTeam.level then
+			return lobby
+		end
+	end
+	return nil
+end
+
+function eventTeam.roomTick()
+	local room = eventTeam.ownedRoom()
+	if not room then
+		eventTeam.roomSince = nil
+		if os.clock() < (eventTeam.nextRequest or 0) then
+			return
+		end
+		eventTeam.nextRequest = os.clock() + 10
+		eventTeam.nextStart = os.clock() + 2
+		local result, _, done = invoke("open_event_portal", eventTeam.level, { difficulty = "Hard", friends_only = true })
+		setStatus(done and result and "Summer Hunt: opened your room" or "Summer Hunt: could not open a room, retrying")
+		return
+	end
+	eventTeam.roomSince = eventTeam.roomSince or os.clock()
+	local teleporting = room:FindFirstChild("Teleporting")
+	if teleporting and teleporting.Value then
+		if hub.status ~= "Summer Hunt: teleporting" then
+			setStatus("Summer Hunt: teleporting")
+		end
+		return
+	end
+	if hub.settings.summerMode == "Party" then
+		local info = eventTeam.partyInfo()
+		local missing = 0
+		for _, player in ipairs(info and info.members or {}) do
+			if player ~= LocalPlayer and not eventTeam.inRoom(room, player) then
+				missing += 1
+			end
+		end
+		if missing > 0 and os.clock() - eventTeam.roomSince < 90 then
+			local text = string.format("Summer Hunt party: waiting for %d member(s) (%ds)", missing, math.floor(90 - (os.clock() - eventTeam.roomSince)))
+			if hub.status ~= text then
+				setStatus(text)
+			end
+			return
+		end
+	end
+	if os.clock() >= (eventTeam.nextStart or 0) then
+		eventTeam.nextStart = os.clock() + 5
+		invoke("request_start_game", room.Name)
+		setStatus("Summer Hunt: starting your room")
+	end
 end
 
 function eventTeam.weatherName(id)
@@ -4089,6 +4179,26 @@ function eventTeam.lobbyTick()
 	local character = LocalPlayer.Character
 	if not (character and character:FindFirstChild("HumanoidRootPart")) then
 		return
+	end
+	if eventTeam.partyMember() then
+		local text = eventTeam.inEventLobby() and "Summer Hunt party: in the host's room" or "Summer Hunt party: waiting for the host"
+		if hub.status ~= text then
+			setStatus(text)
+		end
+		return
+	end
+	if hub.settings.summerMode ~= "Find Match" then
+		if eventTeam.matching and eventTeam.requested then
+			eventTeam.leaveQueue()
+		end
+		if not eventTeam.teleporting then
+			eventTeam.roomTick()
+		end
+		return
+	end
+	local room = eventTeam.ownedRoom()
+	if room and not (room:FindFirstChild("Teleporting") and room.Teleporting.Value) then
+		invoke("request_leave_lobby", room.Name)
 	end
 	if eventTeam.matching then
 		if hub.status ~= "Summer Hunt: looking for a match" then
@@ -8606,7 +8716,7 @@ function lobbyPlan.pick()
 	for _, mode in ipairs(lobbyPlan.order()) do
 		if mode == "Challenge" and lobbyPlan.challengeReady() then
 			return mode
-		elseif mode == "Summer Hunt" and hub.settings.autoSummerHunt and not eventTeam.party() and eventTeam.joinCheck() then
+		elseif mode == "Summer Hunt" and hub.settings.autoSummerHunt and (eventTeam.partyMember() or eventTeam.joinCheck()) then
 			return mode
 		elseif mode == "Dungeon" and hub.settings.autoDungeon and itemCount("dungeon_key") > 0 then
 			return mode
@@ -8960,7 +9070,8 @@ function hub.portal.lobby()
 	local folder = root and root:FindFirstChild("Lobbies")
 	for _, lobby in ipairs(folder and folder:GetChildren() or {}) do
 		local owner = lobby:FindFirstChild("Owner")
-		if owner and owner.Value == LocalPlayer then
+		local level = lobby:FindFirstChild("Level")
+		if owner and owner.Value == LocalPlayer and not (level and level.Value == eventTeam.level) then
 			return lobby
 		end
 	end
@@ -9016,18 +9127,25 @@ function lobbyPlan.lobbyTick(myLobby)
 		return
 	end
 	pcall(eventTeam.shopTick)
-	if eventTeam.party() and eventTeam.inEventLobby() then
+	if eventTeam.partyMember() and eventTeam.inEventLobby() then
 		lobbyPlan.current = "Summer Hunt (party)"
 		lobbyPlan.useTeam("Summer Hunt")
-		if hub.status ~= "Summer Hunt party: in the room" then
-			setStatus("Summer Hunt party: in the room")
+		if hub.status ~= "Summer Hunt party: in the host's room" then
+			setStatus("Summer Hunt party: in the host's room")
 		end
 		return
 	end
 	local pick = lobbyPlan.pick()
 	lobbyPlan.current = pick
-	if pick ~= "Summer Hunt" and eventTeam.matching and eventTeam.requested then
-		eventTeam.leaveQueue()
+	if pick ~= "Summer Hunt" then
+		if eventTeam.matching and eventTeam.requested then
+			eventTeam.leaveQueue()
+		end
+		local room = hub.settings.autoSummerHunt and eventTeam.roomSince and eventTeam.ownedRoom()
+		if room and not (room:FindFirstChild("Teleporting") and room.Teleporting.Value) then
+			invoke("request_leave_lobby", room.Name)
+			eventTeam.roomSince = nil
+		end
 	end
 	if pick and pick ~= "Challenge" and not hub.joining then
 		lobbyPlan.leaveChallengeLobby()
@@ -9840,8 +9958,8 @@ local function mainTick()
 			end
 		end
 		local action = hub.settings.afterFinish
-		if hub.finishedAt and hub.settings.autoSummerHunt and not eventTeam.party() and autoPlay.levelMode() == "Summer Hunt" then
-			if action ~= "Replay" or not eventTeam.levelAllowed() then
+		if hub.finishedAt and hub.settings.autoSummerHunt and autoPlay.levelMode() == "Summer Hunt" then
+			if action ~= "Replay" or not eventTeam.levelAllowed() or eventTeam.partyMember() then
 				action = "Back To Lobby"
 			end
 		end
@@ -10615,12 +10733,13 @@ local function buildUi()
 	summerLeft:Dropdown({
 		Name = "Play",
 		Required = true,
-		Options = { "Solo", "Party" },
-		Default = hub.settings.summerMode == "Party" and 2 or 1,
+		Options = eventTeam.playModes,
+		Default = table.find(eventTeam.playModes, hub.settings.summerMode) or 1,
 		Callback = function(value)
 			if type(value) == "string" and not ui.suppress then
 				setFlag("summerMode", value)
 				eventTeam.nextRequest = 0
+				eventTeam.roomSince = nil
 			end
 		end,
 	})
@@ -10658,7 +10777,7 @@ local function buildUi()
 			setFlag("summerSkipWeathers", list)
 		end,
 	})
-	summerLeft:Label({ Text = "Weather and map rotate for the whole server. Join When / Skip Weathers wait in the lobby until the rotation fits (new map helps the Bingo board, new weather helps Weather Report). After a hunt: Replay only if After Level is Replay and the rules still fit, else back to lobby. Party: wait in an event room" })
+	summerLeft:Label({ Text = "Weather and map rotate for the whole server. Join When / Skip Weathers wait in the lobby until the rotation fits (new map helps the Bingo board, new weather helps Weather Report). After a hunt: Replay only if After Level is Replay and the rules still fit, else back to lobby. Play: Solo opens your own friends-only room and starts at once. Party: the party host opens a friends-only room, waits up to 90 s for every party member, then starts; members wait for the host. Find Match: public matchmaking (up to 6 players)" })
 	ui.summerLabel = summerLeft:Label({ Text = "Off" })
 
 	summerLeft:Header({ Text = "Buff Vote" })
