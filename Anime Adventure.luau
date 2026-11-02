@@ -1,89 +1,3 @@
-pcall(function()
-	local env = getgenv and getgenv() or {}
-	local old = env.AnimeAdventureHub
-	if game.PlaceId == 8304191830 or (type(old) == "table" and old.jobId == game.JobId) or env.AnimeAdventureFreezeJob == game.JobId then
-		return
-	end
-	local lateRun = false
-	pcall(function()
-		lateRun = game:IsLoaded() and time() > 15
-	end)
-	if lateRun then
-		return
-	end
-	local players = game:GetService("Players")
-	local started = os.clock()
-	while not players.LocalPlayer and os.clock() - started < 10 do
-		task.wait(0.05)
-	end
-	local player = players.LocalPlayer
-	if not player then
-		return
-	end
-	local settings = {}
-	pcall(function()
-		local data = game:GetService("HttpService"):JSONDecode(readfile("Order Hub/Anime Adventure/configs/" .. player.Name .. ".json"))
-		if type(data) == "table" and type(data.settings) == "table" then
-			settings = data.settings
-		end
-	end)
-	local april = false
-	pcall(function()
-		local data = game:GetService("TeleportService"):GetLocalPlayerTeleportData()
-		local level = type(data) == "table" and type(data.level_data) == "table" and data.level_data.levelData
-		april = type(level) == "table" and level.id == "april2_event"
-	end)
-	if not april then
-		return
-	end
-	local mobile = false
-	pcall(function()
-		local input = game:GetService("UserInputService")
-		mobile = input.TouchEnabled and not input.KeyboardEnabled
-	end)
-	if mobile then
-		if settings.aprilFreezeMobile ~= true then
-			return
-		end
-	elseif settings.aprilFreeze == false then
-		return
-	end
-	env.AnimeAdventureFreezeJob = game.JobId
-	local seconds = math.clamp(tonumber(settings.eventFreeze) or 90, 30, 180)
-	local freezeSource = [==[
-local seconds = ...
-local function nowMs()
-	local ok, value = pcall(function()
-		return DateTime.now().UnixTimestampMillis
-	end)
-	return ok and value or 0
-end
-local msStop = nowMs() + seconds * 1000
-local untilTime = tick() + seconds
-local hardStop = os.time() + seconds + 3
-local clockStop = os.clock() + seconds + 5
-local spins = 0
-while true do
-	spins += 1
-	if spins % 2000 == 0 and (nowMs() >= msStop or tick() >= untilTime or os.time() >= hardStop or os.clock() >= clockStop) then
-		break
-	end
-end
-]==]
-	local runner = nil
-	pcall(function()
-		runner = loadstring(freezeSource)
-	end)
-	if type(runner) == "function" then
-		pcall(runner, seconds)
-		return
-	end
-	local untilTime = tick() + seconds
-	local hardStop = os.time() + seconds + 3
-	while tick() < untilTime and os.time() < hardStop do
-	end
-end)
-
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -2814,29 +2728,22 @@ local defaults = {
 	autoPlaySkill = false,
 	sequentialUpgrade = true,
 	leftoverUpgrade = false,
-	autoFoolsHunt = false,
-	foolsMode = "Solo",
+	autoSummerHunt = false,
+	summerMode = "Solo",
+	summerJoinRule = "Always",
+	summerSkipWeathers = {},
+	summerClaimBingo = true,
+	summerBuyStars = false,
+	summerKeepPearls = 5000,
 	autoRogue = false,
 	rogueMode = "Good first",
 	roguePrefer = {},
 	roguePriority = {},
 	rogueAvoid = {},
 	rogueSeen = {},
-	eventFreeze = 90,
-	eventArrive = 0,
-	aprilFreeze = true,
-	aprilFreezeMobile = false,
-	aprilPowersOn = false,
-	aprilCarryCount = 3,
-	aprilSellJunk = true,
-	aprilAlwaysSell = { "armin" },
 	rogueTierRule = "Higher tier first",
-	aprilPowerPolicy = {},
-	aprilFocus = {},
-	aprilSpellVariant = "slot_model",
-	aprilSeenUnits = {},
 	modeTeams = {},
-	lobbyOrder = { "Challenge", "Fool's Hunt", "Dungeon", "Infinity Mansion", "Portal", "Auto Join" },
+	lobbyOrder = { "Challenge", "Summer Hunt", "Dungeon", "Infinity Mansion", "Portal", "Auto Join" },
 	autoMansion = false,
 	mansionDifficulty = "Hard",
 	autoChallenge = false,
@@ -3072,6 +2979,30 @@ local function loadConfig()
 	end
 	hub.settings.autoPlayFarmAnchors = nil
 	hub.settings.webhookToday = nil
+	for _, key in ipairs({ "autoFoolsHunt", "foolsMode", "eventFreeze", "eventArrive", "aprilFreeze", "aprilFreezeMobile", "aprilPowersOn", "aprilCarryCount", "aprilSellJunk", "aprilAlwaysSell", "aprilPowerPolicy", "aprilFocus", "aprilSpellVariant", "aprilSeenUnits" }) do
+		hub.settings[key] = nil
+	end
+	if type(hub.settings.lobbyOrder) == "table" then
+		local order = table.clone(hub.settings.lobbyOrder)
+		local old = table.find(order, "Fool's Hunt")
+		if old then
+			if table.find(order, "Summer Hunt") then
+				table.remove(order, old)
+			else
+				order[old] = "Summer Hunt"
+			end
+			hub.settings.lobbyOrder = order
+		end
+	end
+	if type(hub.settings.modeTeams) == "table" then
+		hub.settings.modeTeams["Fool's Hunt"] = nil
+	end
+	if hub.settings.summerMode ~= "Party" then
+		hub.settings.summerMode = "Solo"
+	end
+	if hub.settings.rogueMode == "Bad first (more coins)" then
+		hub.settings.rogueMode = "Bad first (more pearls)"
+	end
 	if hub.settings.buffLoopMode ~= "Max buff 100% (4 per type)" and hub.settings.buffLoopMode ~= "Keep buff up only" then
 		hub.settings.buffLoopMode = "Max buff 100% (4 per type)"
 	end
@@ -3096,7 +3027,7 @@ end
 
 local function setFlag(key, value)
 	hub.settings[key] = value
-	if (value == true and (key == "webhookOn" or key == "autoDungeon" or key == "autoJoin" or key == "autoFoolsHunt" or key == "autoChallenge" or key == "autoNextPortal")) or (key == "afterFinish" and value ~= "Do Nothing") then
+	if (value == true and (key == "webhookOn" or key == "autoDungeon" or key == "autoJoin" or key == "autoSummerHunt" or key == "autoChallenge" or key == "autoNextPortal")) or (key == "afterFinish" and value ~= "Do Nothing") then
 		hub.settings.webhookSession = nil
 	end
 	saveConfig()
@@ -3104,7 +3035,7 @@ end
 
 hub.shareConfig = {
 	prefix = "OrderHubAA:",
-	skip = { webhookUrl = true, webhookPing = true, webhookSession = true, webhookOn = true, rogueSeen = true, challengeSeen = true, challengeTry = true, challengeSkip = true, merchantSeen = true, merchantDone = true, aprilSeenUnits = true, customLevel = true, eventArrive = true, macro = true, playMacro = true },
+	skip = { webhookUrl = true, webhookPing = true, webhookSession = true, webhookOn = true, rogueSeen = true, challengeSeen = true, challengeTry = true, challengeSkip = true, merchantSeen = true, merchantDone = true, customLevel = true, macro = true, playMacro = true },
 }
 
 function hub.shareConfig.export()
@@ -3972,7 +3903,15 @@ local function gameSession()
 	return hub.session
 end
 
-local eventTeam = { level = "april2_event" }
+local eventTeam = {
+	level = "summer2_event",
+	state = "Off",
+	shopState = "Off",
+	weathers = { "rain", "windy", "snow", "fire", "sandstorm", "mana", "underwater", "downpour", "meteor_shower" },
+	weatherNames = { rain = "Rainy", windy = "Windy", snow = "Blizzard", fire = "Inferno", sandstorm = "Sandstorm", mana = "Magical", underwater = "Flooded", downpour = "Stormy", meteor_shower = "Starfall", clear = "Clear" },
+	joinRules = { "Always", "New map or weather", "New map only", "New weather only" },
+	mapNames = {},
+}
 hub.eventTeam = eventTeam
 
 function eventTeam.inRoom(lobby, player)
@@ -4011,7 +3950,7 @@ function eventTeam.rooms()
 	return list
 end
 
-function eventTeam.inAprilLobby()
+function eventTeam.inEventLobby()
 	for _, lobby in ipairs(eventTeam.rooms()) do
 		local level = lobby:FindFirstChild("Level")
 		if level and level:IsA("StringValue") and level.Value == eventTeam.level and eventTeam.inRoom(lobby, LocalPlayer) then
@@ -4022,37 +3961,128 @@ function eventTeam.inAprilLobby()
 end
 
 function eventTeam.party()
-	return hub.settings.autoFoolsHunt == true and hub.settings.foolsMode == "Party"
+	return hub.settings.autoSummerHunt == true and hub.settings.summerMode == "Party"
 end
 
-function eventTeam.bugOn()
-	return hub.settings[hub.isMobile() and "aprilFreezeMobile" or "aprilFreeze"] == true
+function eventTeam.weatherName(id)
+	return eventTeam.weatherNames[tostring(id)] or tostring(id or "?")
 end
 
-function eventTeam.mark()
-	if os.time() - (tonumber(hub.settings.eventArrive) or 0) < 20 then
-		return
+function eventTeam.mapName(id)
+	id = tostring(id or "")
+	if id == "" then
+		return "?"
 	end
-	hub.settings.eventArrive = os.time()
+	if eventTeam.mapNames[id] == nil then
+		local name = id
+		pcall(function()
+			local data = require(ReplicatedStorage.src.Data.Maps)[id]
+			if type(data) == "table" and type(data.name) == "string" then
+				name = data.name
+			end
+		end)
+		eventTeam.mapNames[id] = name
+	end
+	return eventTeam.mapNames[id]
 end
 
-function eventTeam.tick()
-	if eventTeam.matching or eventTeam.inAprilLobby() then
-		eventTeam.seenAt = os.clock()
-		eventTeam.mark()
-	elseif (tonumber(hub.settings.eventArrive) or 0) ~= 0 and not eventTeam.teleporting and os.clock() - (eventTeam.seenAt or 0) > 25 then
-		setFlag("eventArrive", 0)
+function eventTeam.rotation()
+	local service = eventTeam.service
+	if not (service and type(rawget(service, "_CURRENT_EVENT_CHALLENGES")) == "table") then
+		service = hub.gcFind("eventChallenges", { "_CURRENT_EVENT_CHALLENGES" }, function(value)
+			return type(rawget(value, "_CURRENT_EVENT_CHALLENGES")) == "table"
+		end, 10)
+		eventTeam.service = service
 	end
+	local current = service and rawget(service, "_CURRENT_EVENT_CHALLENGES")
+	local entry = type(current) == "table" and current[eventTeam.level]
+	if type(entry) ~= "table" then
+		return nil
+	end
+	local levelData = type(entry.current_level_data) == "table" and entry.current_level_data or {}
+	local forecast = type(entry.forecast) == "table" and entry.forecast or {}
+	return { weather = entry.current_weather, map = levelData.map, nextWeather = forecast.weather }
+end
+
+function eventTeam.wins()
+	local session = gameSession()
+	local wins = session and type(session.profile_data) == "table" and session.profile_data._summer2_hunt_wins
+	wins = type(wins) == "table" and wins or {}
+	return type(wins.maps) == "table" and wins.maps or {}, type(wins.weathers) == "table" and wins.weathers or {}
+end
+
+function eventTeam.pearls()
+	local session = gameSession()
+	local resources = session and type(session.profile_data) == "table" and session.profile_data.resources
+	return type(resources) == "table" and tonumber(resources.SummerPearls) or 0
+end
+
+function eventTeam.allowed(weather, map)
+	local skip = type(hub.settings.summerSkipWeathers) == "table" and hub.settings.summerSkipWeathers or {}
+	if weather and table.find(skip, eventTeam.weatherName(weather)) then
+		return false, "skipping " .. eventTeam.weatherName(weather)
+	end
+	local rule = hub.settings.summerJoinRule
+	if rule == nil or rule == eventTeam.joinRules[1] then
+		return true, nil
+	end
+	local maps, weathers = eventTeam.wins()
+	local newMap = map ~= nil and not maps[map]
+	local newWeather = weather ~= nil and not weathers[weather]
+	if rule == eventTeam.joinRules[2] and not (newMap or newWeather) then
+		return false, "map and weather already won"
+	elseif rule == eventTeam.joinRules[3] and not newMap then
+		return false, "map already won"
+	elseif rule == eventTeam.joinRules[4] and not newWeather then
+		return false, "weather already won"
+	end
+	return true, nil
+end
+
+function eventTeam.joinCheck()
+	local info = eventTeam.rotation()
+	if not info then
+		eventTeam.missingSince = eventTeam.missingSince or os.clock()
+		if os.clock() - eventTeam.missingSince < 30 then
+			eventTeam.state = "Reading the event rotation"
+			return false
+		end
+		eventTeam.state = "Rotation unknown, joining anyway"
+		return true
+	end
+	eventTeam.missingSince = nil
+	local ok, reason = eventTeam.allowed(info.weather, info.map)
+	local now = eventTeam.weatherName(info.weather) .. " on " .. eventTeam.mapName(info.map)
+	local nextText = info.nextWeather and (", next " .. eventTeam.weatherName(info.nextWeather)) or ""
+	eventTeam.state = ok and ("Ready: " .. now .. nextText) or ("Waiting: " .. now .. " (" .. tostring(reason) .. ")" .. nextText)
+	return ok
+end
+
+function eventTeam.levelAllowed()
+	local ok, data = pcall(function()
+		return require(ReplicatedStorage.src.Loader).LevelData
+	end)
+	if not (ok and type(data) == "table") then
+		return false
+	end
+	local allowed = eventTeam.allowed(data._weather, data.map)
+	return allowed
 end
 
 function eventTeam.onMatchmaking(...)
 	for _, value in ipairs({ ... }) do
 		if value == eventTeam.level then
 			eventTeam.matching = true
-			eventTeam.seenAt = os.clock()
-			eventTeam.mark()
 		end
 	end
+end
+
+function eventTeam.leaveQueue()
+	if eventTeam.matching and eventTeam.requested then
+		invoke("leave_matchmaking")
+		eventTeam.matching = false
+	end
+	eventTeam.requested = false
 end
 
 function eventTeam.lobbyTick()
@@ -4061,8 +4091,8 @@ function eventTeam.lobbyTick()
 		return
 	end
 	if eventTeam.matching then
-		if hub.status ~= "Fool's Hunt: looking for a match" then
-			setStatus("Fool's Hunt: looking for a match")
+		if hub.status ~= "Summer Hunt: looking for a match" then
+			setStatus("Summer Hunt: looking for a match")
 		end
 		return
 	end
@@ -4070,18 +4100,88 @@ function eventTeam.lobbyTick()
 		return
 	end
 	eventTeam.nextRequest = os.clock() + 15
+	eventTeam.requested = true
 	invoke("request_matchmaking", eventTeam.level)
-	setStatus("Fool's Hunt: joining matchmaking")
+	setStatus("Summer Hunt: joining matchmaking")
 end
 
 function eventTeam.onMatchmakingEnded()
-	if eventTeam.matching then
-		eventTeam.matching = false
-		eventTeam.seenAt = os.clock()
+	eventTeam.matching = false
+end
+
+function eventTeam.onTeleport(state)
+	if state == Enum.TeleportState.Failed then
+		eventTeam.teleporting = false
+	elseif state == Enum.TeleportState.Started or state == Enum.TeleportState.InProgress then
+		eventTeam.teleporting = true
 	end
 end
 
-eventTeam.pickModes = { "Good first", "Bad first (more coins)" }
+function eventTeam.shopTick()
+	if not (hub.settings.summerClaimBingo or hub.settings.summerBuyStars) or os.clock() < (eventTeam.nextShop or 0) then
+		return
+	end
+	eventTeam.nextShop = os.clock() + 3
+	if hub.settings.summerClaimBingo then
+		local count = 0
+		for _ in pairs((eventTeam.wins())) do
+			count += 1
+		end
+		if count > 0 and (count ~= eventTeam.claimKey or os.clock() >= (eventTeam.nextClaim or 0)) then
+			eventTeam.claimKey = count
+			eventTeam.nextClaim = os.clock() + 600
+			local result, _, done = invoke("claim_summer2_map_board_lines")
+			if done and result then
+				eventTeam.shopState = "Claimed bingo rewards"
+				setStatus("Summer: claimed bingo rewards")
+			end
+		end
+	end
+	if hub.settings.summerBuyStars then
+		local pearls = eventTeam.pearls()
+		local spare = pearls - math.max(tonumber(hub.settings.summerKeepPearls) or 0, 0)
+		if spare >= 150 then
+			local amount = spare >= 1500 and "10" or "1"
+			local before = pearls
+			invoke("buy_item_generic", "capsule_summer2", "event", eventTeam.shopGui or "event_shop", amount)
+			task.wait(1.5)
+			if eventTeam.pearls() < before then
+				eventTeam.bought = (eventTeam.bought or 0) + tonumber(amount)
+				eventTeam.shopState = "Bought " .. eventTeam.bought .. " Sunny Stars this session"
+			else
+				eventTeam.nextShop = os.clock() + 60
+				eventTeam.shopState = "Star purchase did not go through, retry in 60 s"
+			end
+		end
+	end
+end
+
+function eventTeam.progressText()
+	if os.clock() < (eventTeam.nextProgress or 0) and eventTeam.progress then
+		return eventTeam.progress
+	end
+	eventTeam.nextProgress = os.clock() + 3
+	local maps, weathers = eventTeam.wins()
+	local mapCount, weatherCount = 0, 0
+	for _ in pairs(maps) do
+		mapCount += 1
+	end
+	for id in pairs(weathers) do
+		if table.find(eventTeam.weathers, id) then
+			weatherCount += 1
+		end
+	end
+	local missing = {}
+	for _, id in ipairs(eventTeam.weathers) do
+		if not weathers[id] then
+			table.insert(missing, eventTeam.weatherName(id))
+		end
+	end
+	eventTeam.progress = string.format("Pearls %s | maps won %d | weathers won %d/%d%s", hub.webhook and hub.webhook.comma(eventTeam.pearls()) or tostring(eventTeam.pearls()), mapCount, weatherCount, #eventTeam.weathers, #missing > 0 and (" (missing " .. table.concat(missing, ", ") .. ")") or "")
+	return eventTeam.progress
+end
+
+eventTeam.pickModes = { "Good first", "Bad first (more pearls)" }
 eventTeam.knownPicks = { "+ Attack", "+ Range", "- Cooldown", "+ Boss Damage", "+ Yen", "+ Random Blessings", "+ Enemy Health", "+ Enemy Shield", "+ Enemy Speed", "+ Enemy Regen", "+ Explosive Deaths", "+ Resistant Enemies", "+ Spellproof Enemies", "+ Plated Enemies", "+ Random Curses", "+ New Path" }
 
 function eventTeam.baseTitle(title)
@@ -4337,17 +4437,6 @@ function eventTeam.voteTick()
 	eventTeam.nextVoteTry = os.clock() + 20
 	eventTeam.voteAt = os.clock()
 	task.spawn(eventTeam.voteLoop)
-end
-
-function eventTeam.onTeleport(state)
-	if state == Enum.TeleportState.Failed then
-		eventTeam.teleporting = false
-		return
-	end
-	if os.clock() - (eventTeam.seenAt or -100) < 25 then
-		eventTeam.teleporting = true
-		eventTeam.mark()
-	end
 end
 
 
@@ -5072,13 +5161,13 @@ function autoPlay.gameCap(unitId, uuid)
 	return placeLimit(unitId, uuid) or 6
 end
 
-autoPlay.modes = { "Story", "Legend", "Infinite", "Challenge", "Raid", "Portal", "Infinite Tower", "Event Contract", "Tournament", "Dungeon", "Fool's Hunt" }
+autoPlay.modes = { "Story", "Legend", "Infinite", "Challenge", "Raid", "Portal", "Infinite Tower", "Event Contract", "Tournament", "Dungeon", "Summer Hunt" }
 
 function autoPlay.modeOf(data)
 	local id = tostring(data.id or "")
 	local gamemode = tostring(data._gamemode or data._OVERRIDE_GAMEMODE or "")
-	if data._randomequippedmode ~= nil then
-		return "Fool's Hunt"
+	if id == eventTeam.level or (type(data._roguelike_mode) == "table" and type(data._MATCHMAKING) == "table") then
+		return "Summer Hunt"
 	elseif data._dungeon then
 		return "Dungeon"
 	elseif data._tournament then
@@ -5805,41 +5894,7 @@ function buffLoop.isBuffUnit(unitId)
 	return info ~= nil and buffLoop.skillInfo(buffLoop.scriptedUnits[unitId] or info.active_attack) ~= nil
 end
 
-autoPlay.smart = { invested = setmetatable({}, { __mode = "k" }), sold = setmetatable({}, { __mode = "k" }), nextSell = 0, reserveCost = 0, reserveSince = 0 }
-
-function autoPlay.smart.on()
-	if autoPlay.levelMode() ~= "Fool's Hunt" then
-		return false
-	end
-	if os.clock() < (autoPlay.smart.randomCheckAt or 0) then
-		return autoPlay.smart.randomTeam == true
-	end
-	autoPlay.smart.randomCheckAt = os.clock() + 2
-	local random = false
-	pcall(function()
-		local session = gameSession()
-		local temporary = session and session.collection and session.collection.temporary_units
-		if type(temporary) ~= "table" then
-			return
-		end
-		for _, entry in ipairs(autoPlay.team or {}) do
-			if temporary[entry.uuid] ~= nil then
-				random = true
-			end
-		end
-		if not random then
-			for _, model in ipairs(unitModels()) do
-				local uuid = modelUuid(model)
-				if uuid and temporary[uuid] ~= nil then
-					random = true
-					break
-				end
-			end
-		end
-	end)
-	autoPlay.smart.randomTeam = random
-	return random
-end
+autoPlay.smart = {}
 
 function autoPlay.smart.dataDps(unitId, level)
 	local info = unitData(unitId)
@@ -5892,178 +5947,6 @@ function autoPlay.smart.dps(model)
 		return 0
 	end
 	return (damage and tonumber(damage.Value) or 0) / math.max(seconds, 1)
-end
-
-function autoPlay.smart.inList(key, unitId)
-	local base = string.gsub(tostring(unitId), "_evolved$", "")
-	for _, id in ipairs(type(hub.settings[key]) == "table" and hub.settings[key] or {}) do
-		if id == unitId or id == base then
-			return true
-		end
-	end
-	return false
-end
-
-function autoPlay.smart.isFocus(unitId)
-	return autoPlay.smart.inList("aprilFocus", unitId)
-end
-
-function autoPlay.smart.isJunk(unitId)
-	return autoPlay.smart.inList("aprilAlwaysSell", unitId)
-end
-
-autoPlay.smart.discardVariants = { "uuid", "slotText", "slotNumber" }
-autoPlay.smart.discardTries = {}
-
-function autoPlay.smart.discard(entry)
-	local smart = autoPlay.smart
-	local tries = smart.discardTries[entry.uuid] or 0
-	smart.discardTries[entry.uuid] = tries + 1
-	local variant = smart.discardVariant or smart.discardVariants[tries % #smart.discardVariants + 1]
-	if variant == "slotText" then
-		invoke("delete_ingame_temporary_unit", tostring(entry.slot))
-	elseif variant == "slotNumber" then
-		invoke("delete_ingame_temporary_unit", entry.slot)
-	else
-		invoke("delete_ingame_temporary_unit", entry.uuid)
-	end
-	local untilTime = os.clock() + 1.5
-	local gone = false
-	while not gone and os.clock() < untilTime do
-		task.wait(0.15)
-		gone = true
-		for _, item in ipairs(teamUnits()) do
-			if item.uuid == entry.uuid then
-				gone = false
-			end
-		end
-	end
-	if gone then
-		smart.discardVariant = variant
-	end
-	return gone
-end
-
-function autoPlay.smart.carries(models)
-	local list = {}
-	for _, model in ipairs(models) do
-		local unitId = modelUnitId(model)
-		if not isFarm(unitId) and not autoPlay.smart.isJunk(unitId) then
-			local forced =autoPlay.smart.invested[model] == true or autoPlay.smart.isFocus(unitId) or buffLoop.isBuffUnit(unitId)
-			table.insert(list, { model = model, score = autoPlay.smart.dps(model), forced = forced })
-		end
-	end
-	table.sort(list, function(a, b)
-		return a.score > b.score
-	end)
-	local set = {}
-	local count = math.clamp(math.floor(tonumber(hub.settings.aprilCarryCount) or 3), 1, 10)
-	local taken = 0
-	for _, item in ipairs(list) do
-		if item.forced then
-			set[item.model] = true
-		elseif taken < count and item.score > 0 then
-			set[item.model] = true
-			taken += 1
-		end
-	end
-	return set
-end
-
-function autoPlay.smart.showCarries(carries)
-	if not ui.carryLabel then
-		return
-	end
-	local names = {}
-	for model in pairs(carries) do
-		if model.Parent then
-			table.insert(names, unitName(modelUnitId(model)) .. " +" .. tostring(modelLevel(model)))
-		end
-	end
-	table.sort(names)
-	local text = "Carries: " .. (#names > 0 and table.concat(names, ", ") or "none yet")
-	if text ~= autoPlay.smart.carryText then
-		autoPlay.smart.carryText = text
-		pcall(function()
-			ui.carryLabel:UpdateName(text)
-		end)
-	end
-end
-
-function autoPlay.smart.sellFor(entry, models)
-	if hub.settings.aprilSellJunk == false or not autoPlay.fullLearned or os.clock() < autoPlay.smart.nextSell or isFarm(entry.unitId) then
-		return nil
-	end
-	local incoming = autoPlay.smart.dataDps(entry.unitId, 0)
-	if incoming <= 0 then
-		return nil
-	end
-	local carries = autoPlay.smart.carries(models)
-	local worst, worstDps = nil, nil
-	for _, model in ipairs(models) do
-		local unitId = modelUnitId(model)
-		local stats = model:FindFirstChild("_stats")
-		local spent = stats and stats:FindFirstChild("total_spent")
-		if not carries[model] and not autoPlay.smart.sold[model] and not isFarm(unitId) and spent and (tonumber(spent.Value) or 0) > 0 then
-			local dps = autoPlay.smart.dataDps(unitId, modelLevel(model))
-			if dps > 0 and (not worstDps or dps < worstDps) then
-				worst, worstDps = model, dps
-			end
-		end
-	end
-	if worst and incoming >= worstDps * 1.5 then
-		return worst
-	end
-	return nil
-end
-
-function autoPlay.smart.upgrade(entries)
-	local owner = {}
-	local models = {}
-	for _, entry in ipairs(entries) do
-		for _, model in ipairs(entry.models) do
-			owner[model] = entry
-			table.insert(models, model)
-		end
-	end
-	local carries = autoPlay.smart.carries(models)
-	autoPlay.smart.showCarries(carries)
-	local best, bestTier, bestValue = nil, nil, nil
-	for _, model in ipairs(models) do
-		if (autoPlay.upgradeFails[model] or 0) < 3 and not autoPlay.smart.isJunk(modelUnitId(model)) then
-			local cost = upgradeCost(model)
-			if type(cost) == "number" then
-				local unitId = modelUnitId(model)
-				local level = modelLevel(model)
-				local tier, value = 1, 0
-				if isFarm(unitId) then
-					local gain = autoPlay.smart.farmAt(unitId, level + 1) - autoPlay.smart.farmAt(unitId, level)
-					if gain * 8 >= cost then
-						tier, value = 3, -cost
-					else
-						tier, value = 1, gain / math.max(cost, 1)
-					end
-				else
-					local now = autoPlay.smart.dataDps(unitId, level)
-					local gain = now > 0 and autoPlay.smart.dps(model) * (autoPlay.smart.dataDps(unitId, level + 1) / now - 1) or 0
-					value = gain > 0 and gain / math.max(cost, 1) or 1 / math.max(cost, 1)
-					tier = carries[model] and 2 or 1
-				end
-				if not bestTier or tier > bestTier or (tier == bestTier and value > bestValue) then
-					best, bestTier, bestValue = { kind = "upgrade", entry = owner[model], model = model, cost = cost, level = level }, tier, value
-				end
-			end
-		end
-	end
-	if not best or (bestTier == 1 and hub.settings.leftoverUpgrade ~= true) then
-		return nil
-	end
-	local reserve = autoPlay.smart.reserveCost or 0
-	if bestTier < 3 and reserve > 0 and os.clock() - autoPlay.smart.reserveSince < 40 then
-		best.cost += reserve
-		best.saving = true
-	end
-	return best
 end
 
 autoPlay.farmPlan = {}
@@ -6137,16 +6020,8 @@ end
 
 local function nextAction()
 	local entries = {}
-	local smart = autoPlay.smart.on()
 	for _, entry in ipairs(teamUnits()) do
 		local config = slotConfig(entry.slot)
-		if smart then
-			config = table.clone(config)
-			config.place = true
-			config.max = math.max(config.max, 6)
-			config.priority = isFarm(entry.unitId) and 1 or 2
-			entry.power = autoPlay.smart.dataDps(entry.unitId, 0)
-		end
 		do
 			entry.config = config
 			entry.models = placedByUuid(entry.uuid)
@@ -6182,9 +6057,6 @@ local function nextAction()
 		if a.config.priority ~= b.config.priority then
 			return a.config.priority < b.config.priority
 		end
-		if smart and (a.power or 0) ~= (b.power or 0) then
-			return (a.power or 0) > (b.power or 0)
-		end
 		return a.slot < b.slot
 	end)
 
@@ -6192,7 +6064,7 @@ local function nextAction()
 		autoPlay.fullCount = 20
 	end
 	local roomy = true
-	if autoPlay.fullCount and not (smart and not autoPlay.fullLearned) then
+	if autoPlay.fullCount then
 		local total = #unitModels()
 		if total >= autoPlay.fullCount then
 			autoPlay.belowSince = nil
@@ -6217,54 +6089,6 @@ local function nextAction()
 		if sellAll then
 			return { kind = "idle", text = "Sold every unit at wave " .. tostring(hub.settings.sellAllWave) .. ", not placing again" }
 		end
-	end
-	if smart then
-		local money = myResource()
-		local waiting = nil
-		local allModels = nil
-		for _, entry in ipairs(entries) do
-			if autoPlay.smart.isJunk(entry.unitId) then
-				for _, model in ipairs(entry.models) do
-					if not autoPlay.smart.sold[model] then
-						return { kind = "sell", entry = entry, model = model, cost = 0, junk = true }
-					end
-				end
-				if entry.slot < 100 and #entry.models == 0 and (autoPlay.smart.discardTries[entry.uuid] or 0) < 6 and os.clock() >= (autoPlay.smart.nextDiscard or 0) then
-					return { kind = "discard", entry = entry, cost = 0 }
-				end
-			end
-		end
-		for _, entry in ipairs(entries) do
-			if #entry.models < entry.cap and not autoPlay.smart.isJunk(entry.unitId) then
-				if roomy then
-					if entry.cost <= money then
-						return { kind = "place", entry = entry, cost = entry.cost }
-					end
-					waiting = waiting or { kind = "place", entry = entry, cost = entry.cost }
-				else
-					if not allModels then
-						allModels = {}
-						for _, other in ipairs(entries) do
-							for _, model in ipairs(other.models) do
-								table.insert(allModels, model)
-							end
-						end
-					end
-					local junk = autoPlay.smart.sellFor(entry, allModels)
-					if junk then
-						return { kind = "sell", entry = entry, model = junk, cost = 0 }
-					end
-				end
-			end
-		end
-		if not hub.settings.autoPlayUpgrade then
-			return waiting
-		end
-		local upgrade = autoPlay.smart.upgrade(entries)
-		if waiting and (not upgrade or not isFarm(upgrade.entry.unitId) or upgrade.cost > money) then
-			return waiting
-		end
-		return upgrade or waiting
 	end
 	local lastWave = autoPlay.farmPlan.lastWave()
 	for _, entry in ipairs(entries) do
@@ -6928,338 +6752,6 @@ local function useSkills()
 	end
 end
 
-eventTeam.powers = {
-	kinds = { "Random Buff", "Merge", "Clone", "Refund", "Ritual", "Astral Summon", "Astral Gate" },
-	ids = { sell_refund = "Refund", random_buff = "Random Buff", sacrifice = "Merge", clone = "Clone", ritual = "Ritual", summon = "Astral Summon", gate = "Astral Gate" },
-	policies = {
-		["Random Buff"] = { "Focus unit", "Strongest", "Discard", "Off" },
-		Merge = { "Focus unit", "Most copies", "Discard", "Off" },
-		Clone = { "Focus unit", "Strongest", "Discard", "Off" },
-		Refund = { "Weakest", "Discard", "Off" },
-		Ritual = { "Focus unit", "Strongest", "Discard", "Off" },
-		["Astral Summon"] = { "Use", "Discard", "Off" },
-		["Astral Gate"] = { "Use", "Discard", "Off" },
-	},
-	seed = { "natsu_evolved", "konan_unit_evolved", "sabo_evolved", "avdol_evolved", "speedwagon", "bee_girl_evolved", "fujitora_evolved", "tengen_2_evolved", "narberal_evolved", "vanilla_ice_evolved", "esdeath_evolved", "shigaraki_evolved", "hoshino_evolved" },
-	variants = { "slot_model", "slot_uuid", "model_slot" },
-	tried = {},
-	misses = {},
-	nextTick = 0,
-}
-
-function eventTeam.powers.data()
-	if eventTeam.powers.spellData == nil then
-		local ok, data = pcall(function()
-			return require(ReplicatedStorage.src.Data.IngameSpells)
-		end)
-		eventTeam.powers.spellData = ok and type(data) == "table" and data or false
-	end
-	return eventTeam.powers.spellData or {}
-end
-
-function eventTeam.powers.policy(kind)
-	local saved = type(hub.settings.aprilPowerPolicy) == "table" and hub.settings.aprilPowerPolicy[kind]
-	local options = eventTeam.powers.policies[kind] or { "Off" }
-	return table.find(options, saved) and saved or options[1]
-end
-
-function eventTeam.powers.inLevel()
-	local present, started = gameState()
-	return present and started and not hub.finishedAt and autoPlay.levelMode() == "Fool's Hunt"
-end
-
-function eventTeam.powers.cards()
-	local list = {}
-	local session = gameSession()
-	local spells = session and type(session.ingame_spells) == "table" and session.ingame_spells or {}
-	for slot, id in pairs(spells) do
-		local kind = eventTeam.powers.ids[tostring(id)]
-		if kind then
-			local info = eventTeam.powers.data()[tostring(id)]
-			table.insert(list, {
-				slot = slot,
-				id = tostring(id),
-				kind = kind,
-				cost = type(info) == "table" and tonumber(info.cost) or 0,
-				instant = type(info) == "table" and type(info.apply) == "table" and info.apply._t == "instant",
-			})
-		end
-	end
-	table.sort(list, function(a, b)
-		return tostring(a.slot) < tostring(b.slot)
-	end)
-	return list
-end
-
-function eventTeam.powers.still(card)
-	local session = gameSession()
-	local spells = session and type(session.ingame_spells) == "table" and session.ingame_spells or {}
-	return tostring(spells[card.slot] or "") == card.id
-end
-
-function eventTeam.powers.remember()
-	local seen = type(hub.settings.aprilSeenUnits) == "table" and hub.settings.aprilSeenUnits or {}
-	local added = false
-	local copy = table.clone(seen)
-	local session = gameSession()
-	local temporary = session and session.collection and type(session.collection.temporary_units) == "table" and session.collection.temporary_units or {}
-	for _, unit in pairs(temporary) do
-		local id = type(unit) == "table" and unit.unit_id
-		if type(id) == "string" and not table.find(copy, id) then
-			table.insert(copy, id)
-			added = true
-		end
-	end
-	if added then
-		setFlag("aprilSeenUnits", copy)
-		if ui.refreshFocus then
-			pcall(ui.refreshFocus)
-		end
-	end
-end
-
-function eventTeam.powers.focusPool()
-	local all = {}
-	local function add(id)
-		if type(id) == "string" and id ~= "" and not table.find(all, id) and unitData(id) then
-			table.insert(all, id)
-		end
-	end
-	for _, id in ipairs(eventTeam.powers.seed) do
-		add(id)
-	end
-	for _, id in ipairs(type(hub.settings.aprilSeenUnits) == "table" and hub.settings.aprilSeenUnits or {}) do
-		add(id)
-	end
-	for _, id in ipairs(type(hub.settings.aprilFocus) == "table" and hub.settings.aprilFocus or {}) do
-		add(id)
-	end
-	for _, id in ipairs(type(hub.settings.aprilAlwaysSell) == "table" and hub.settings.aprilAlwaysSell or {}) do
-		add(id)
-	end
-	pcall(function()
-		local session = gameSession()
-		local equipped = hub.lobbyPlan.equipped()
-		for slot = 1, 6 do
-			local uuid = equipped and (equipped[tostring(slot)] or equipped[slot])
-			if uuid then
-				local unit = session.collection:get_unit_by_uuid(uuid)
-				add(type(unit) == "table" and unit.unit_id or nil)
-			end
-		end
-	end)
-	return all
-end
-
-function eventTeam.powers.units()
-	local list = {}
-	local focus = {}
-	for _, id in ipairs(type(hub.settings.aprilFocus) == "table" and hub.settings.aprilFocus or {}) do
-		focus[id] = true
-	end
-	for _, model in ipairs(unitModels()) do
-		local ok, pos = pcall(function()
-			return model:GetPivot().Position
-		end)
-		if ok then
-			local stats = model:FindFirstChild("_stats")
-			local id = modelUnitId(model)
-			local damage = stats and stats:FindFirstChild("damage")
-			local range = stats and stats:FindFirstChild("range")
-			local label = string.lower(id .. " " .. unitName(id) .. " " .. model.Name)
-			table.insert(list, {
-				model = model,
-				id = id,
-				uuid = modelUuid(model),
-				pos = pos,
-				damage = damage and tonumber(damage.Value) or 0,
-				dps = autoPlay.smart.dps(model),
-				junk = autoPlay.smart.isJunk(id),
-				range = range and tonumber(range.Value) or 0,
-				level = modelLevel(model),
-				farm = isFarm(id),
-				focus = focus[id] == true or focus[(string.gsub(id, "_evolved$", ""))] == true,
-				warlord = string.find(label, "warlord", 1, true) ~= nil or string.find(label, "divine", 1, true) ~= nil,
-			})
-		end
-	end
-	return list
-end
-
-function eventTeam.powers.target(kind, policy)
-	local units = eventTeam.powers.units()
-	local best, bestScore = nil, nil
-	local function consider(unit, score)
-		if score and (not bestScore or score > bestScore) then
-			best, bestScore = unit, score
-		end
-	end
-	if kind == "Ritual" then
-		for _, unit in ipairs(units) do
-			if unit.warlord then
-				return nil
-			end
-		end
-	end
-	if kind == "Random Buff" or kind == "Clone" or kind == "Ritual" then
-		for _, unit in ipairs(units) do
-			if not unit.farm and not unit.warlord and not unit.junk and unit.damage > 0 then
-				local score = unit.dps + unit.level
-				if policy == "Focus unit" and unit.focus then
-					score += 1e15
-				end
-				consider(unit, score)
-			end
-		end
-	elseif kind == "Merge" then
-		for _, unit in ipairs(units) do
-			if not unit.farm and not unit.junk and unit.damage > 0 then
-				local copies, gained = 0, 0
-				for _, other in ipairs(units) do
-					if other ~= unit and other.id == unit.id and flat(other.pos, unit.pos) <= math.max(unit.range, 1) then
-						copies += 1
-						gained += other.dps * 1.5
-					end
-				end
-				if copies > 0 then
-					consider(unit, unit.dps + gained + copies + ((policy == "Focus unit" and unit.focus) and 1e15 or 0))
-				end
-			end
-		end
-	elseif kind == "Refund" then
-		local models = {}
-		for _, unit in ipairs(units) do
-			table.insert(models, unit.model)
-		end
-		local carries = autoPlay.smart.carries(models)
-		for _, unit in ipairs(units) do
-			if unit.junk then
-				consider(unit, 1e15)
-			elseif not unit.focus and not unit.warlord and not unit.farm and unit.damage > 0 and not carries[unit.model] then
-				consider(unit, -(unit.dps + unit.level))
-			end
-		end
-	end
-	return best
-end
-
-function eventTeam.powers.args(card, target, variant)
-	if card.instant or not target then
-		return { card.slot }
-	elseif variant == "slot_uuid" then
-		return { card.slot, target.uuid }
-	elseif variant == "model_slot" then
-		return { target.model, card.slot }
-	end
-	return { card.slot, target.model }
-end
-
-function eventTeam.powers.use(card)
-	local powers = eventTeam.powers
-	local policy = powers.policy(card.kind)
-	if policy == "Off" then
-		return nil
-	end
-	if policy == "Discard" then
-		invoke("delete_ingame_spell", card.slot)
-		return true, "discarded " .. card.kind
-	end
-	if card.cost > 0 and myResource() < card.cost then
-		return false, card.kind .. " needs " .. card.cost
-	end
-	local target = nil
-	if not card.instant then
-		target = powers.target(card.kind, policy)
-		if not target then
-			return false, card.kind .. ": no target"
-		end
-	end
-	local variant = table.find(powers.variants, hub.settings.aprilSpellVariant) and hub.settings.aprilSpellVariant or powers.variants[1]
-	local args = powers.args(card, target, variant)
-	invoke("use_ingame_spell", table.unpack(args, 1, #args))
-	local untilTime = os.clock() + 2
-	while powers.still(card) and os.clock() < untilTime do
-		task.wait(0.1)
-	end
-	if powers.still(card) then
-		if not card.instant then
-			local key = card.slot .. card.id
-			powers.misses[key] = (powers.misses[key] or 0) + 1
-			if powers.misses[key] >= 2 then
-				powers.misses[key] = 0
-				local index = table.find(powers.variants, variant) or 1
-				setFlag("aprilSpellVariant", powers.variants[index % #powers.variants + 1])
-			end
-		end
-		return false, card.kind .. " was not accepted"
-	end
-	if target and target.model.Parent and (card.kind == "Random Buff" or card.kind == "Clone" or card.kind == "Merge") then
-		autoPlay.smart.invested[target.model] = true
-	end
-	return true, card.kind .. (target and (" on " .. unitName(target.id)) or "")
-end
-
-function eventTeam.powers.tick()
-	local powers = eventTeam.powers
-	if os.clock() < powers.nextTick or powers.busy then
-		return
-	end
-	powers.nextTick = os.clock() + 0.5
-	if not powers.inLevel() then
-		autoPlay.smart.reserveCost = 0
-		return
-	end
-	pcall(powers.remember)
-	local cards = powers.cards()
-	local held = {}
-	for _, card in ipairs(cards) do
-		table.insert(held, card.kind)
-	end
-	local note = nil
-	local reserve, reserveKey = 0, nil
-	if hub.settings.aprilPowersOn then
-		for _, card in ipairs(cards) do
-			local policy = powers.policy(card.kind)
-			if card.cost > reserve and policy ~= "Off" and policy ~= "Discard" and (card.instant or powers.target(card.kind, policy)) then
-				reserve, reserveKey = card.cost, card.slot .. card.id
-			end
-		end
-	end
-	if reserveKey ~= powers.reserveKey then
-		powers.reserveKey = reserveKey
-		autoPlay.smart.reserveSince = os.clock()
-	end
-	autoPlay.smart.reserveCost = reserve
-	if hub.settings.aprilPowersOn then
-		for _, card in ipairs(cards) do
-			local key = card.slot .. card.id
-			if os.clock() >= (powers.tried[key] or 0) then
-				powers.busy = true
-				local ok, result, text = pcall(powers.use, card)
-				powers.busy = false
-				if ok and result ~= nil then
-					powers.tried[key] = os.clock() + (result and 1 or 3)
-					if result then
-						setStatus("Spell: " .. tostring(text))
-						note = tostring(text)
-						break
-					end
-					note = note or tostring(text)
-				end
-			end
-		end
-	end
-	if ui.powerLabel then
-		local text = "Spells: " .. (#held > 0 and table.concat(held, ", ") or "none") .. (note and (" · " .. note) or "")
-		if text ~= powers.labelText then
-			powers.labelText = text
-			pcall(function()
-				ui.powerLabel:UpdateName(text)
-			end)
-		end
-	end
-end
-
 local function autoPlayTick()
 	if not hub.settings.autoPlay then
 		autoPlay.state = "Off"
@@ -7303,27 +6795,9 @@ local function autoPlayTick()
 	end
 	local entry = action.entry
 	local money = myResource()
-	if action.kind == "discard" then
-		autoPlay.smart.nextDiscard = os.clock() + 1
-		autoPlay.state = "Remove " .. unitName(entry.unitId) .. " from slot " .. tostring(entry.slot)
-		if autoPlay.smart.discard(entry) then
-			return 0.1
-		end
-		autoPlay.state = "Could not remove " .. unitName(entry.unitId) .. ", leaving it unplaced"
-		return 0.3
-	end
 	if action.kind == "sell" then
-		autoPlay.smart.sold[action.model] = true
-		if action.waveSell then
-			autoPlay.waveSold[action.model] = (autoPlay.waveSold[action.model] or 0) + 1
-		elseif not action.junk then
-			autoPlay.smart.nextSell = os.clock() + 2
-		end
-		if action.waveSell then
-			autoPlay.state = "Sell " .. unitName(entry.unitId) .. (action.waveSell == "all" and " (Sell All, wave " or " (Sell Farms, wave ") .. tostring(autoPlay.wave()) .. ")"
-		else
-			autoPlay.state = action.junk and ("Sell " .. unitName(entry.unitId) .. " (Always Sell list)") or ("Sell " .. unitName(modelUnitId(action.model)) .. " to make room for " .. unitName(entry.unitId))
-		end
+		autoPlay.waveSold[action.model] = (autoPlay.waveSold[action.model] or 0) + 1
+		autoPlay.state = "Sell " .. unitName(entry.unitId) .. (action.waveSell == "all" and " (Sell All, wave " or " (Sell Farms, wave ") .. tostring(autoPlay.wave()) .. ")"
 		invoke("sell_unit_ingame", action.model)
 		local untilTime = os.clock() + 1.5
 		while action.model.Parent and os.clock() < untilTime do
@@ -7365,7 +6839,7 @@ local function autoPlayTick()
 		return 0.3
 	end
 	local cluster = nil
-	if buffLoop.isBuffUnit(entry.unitId) or (autoPlay.smart.on() and not entry.farm) then
+	if buffLoop.isBuffUnit(entry.unitId) then
 		cluster = {}
 		for _, model in ipairs(unitModels()) do
 			if modelUnitId(model) == entry.unitId then
@@ -7376,9 +6850,6 @@ local function autoPlayTick()
 					table.insert(cluster, pivot)
 				end
 			end
-		end
-		if autoPlay.smart.on() then
-			cluster.reach = math.max(4, (tonumber((unitData(entry.unitId) or {}).range) or 10) * 0.8)
 		end
 	end
 	local spot = bestSpot(entry.unitId, cluster, buffLoop.isBuffUnit(entry.unitId))
@@ -8755,7 +8226,7 @@ function dungeon.statusText()
 end
 
 local lobbyPlan = {
-	modes = { "Challenge", "Fool's Hunt", "Dungeon", "Infinity Mansion", "Portal", "Auto Join" },
+	modes = { "Challenge", "Summer Hunt", "Dungeon", "Infinity Mansion", "Portal", "Auto Join" },
 	ordinals = { "1st", "2nd", "3rd", "4th", "5th", "6th" },
 	mansionState = "Off",
 	mansionNext = 0,
@@ -9111,7 +8582,7 @@ function lobbyPlan.levelMode(levelId)
 end
 
 function lobbyPlan.lobbyMode(levelMode)
-	if levelMode == "Challenge" or levelMode == "Fool's Hunt" or levelMode == "Dungeon" then
+	if levelMode == "Challenge" or levelMode == "Summer Hunt" or levelMode == "Dungeon" then
 		return levelMode
 	end
 	if levelMode == "Infinite Tower" then
@@ -9135,7 +8606,7 @@ function lobbyPlan.pick()
 	for _, mode in ipairs(lobbyPlan.order()) do
 		if mode == "Challenge" and lobbyPlan.challengeReady() then
 			return mode
-		elseif mode == "Fool's Hunt" and hub.settings.autoFoolsHunt and not eventTeam.party() then
+		elseif mode == "Summer Hunt" and hub.settings.autoSummerHunt and not eventTeam.party() and eventTeam.joinCheck() then
 			return mode
 		elseif mode == "Dungeon" and hub.settings.autoDungeon and itemCount("dungeon_key") > 0 then
 			return mode
@@ -9544,19 +9015,19 @@ function lobbyPlan.lobbyTick(myLobby)
 	if lobbyPlan.buying then
 		return
 	end
-	if eventTeam.party() and eventTeam.inAprilLobby() then
-		lobbyPlan.current = "Fool's Hunt (party)"
-		lobbyPlan.useTeam("Fool's Hunt")
-		if hub.status ~= "Fool's Hunt party: in the room" then
-			setStatus("Fool's Hunt party: in the room")
+	pcall(eventTeam.shopTick)
+	if eventTeam.party() and eventTeam.inEventLobby() then
+		lobbyPlan.current = "Summer Hunt (party)"
+		lobbyPlan.useTeam("Summer Hunt")
+		if hub.status ~= "Summer Hunt party: in the room" then
+			setStatus("Summer Hunt party: in the room")
 		end
 		return
 	end
 	local pick = lobbyPlan.pick()
 	lobbyPlan.current = pick
-	if pick and pick ~= "Fool's Hunt" and eventTeam.matching then
-		invoke("leave_matchmaking")
-		eventTeam.matching = false
+	if pick ~= "Summer Hunt" and eventTeam.matching and eventTeam.requested then
+		eventTeam.leaveQueue()
 	end
 	if pick and pick ~= "Challenge" and not hub.joining then
 		lobbyPlan.leaveChallengeLobby()
@@ -9576,8 +9047,8 @@ function lobbyPlan.lobbyTick(myLobby)
 		if lobbyPlan.useTeam("Challenge") then
 			lobbyPlan.joinChallenge()
 		end
-	elseif pick == "Fool's Hunt" then
-		if eventTeam.matching or lobbyPlan.useTeam("Fool's Hunt") then
+	elseif pick == "Summer Hunt" then
+		if eventTeam.matching or lobbyPlan.useTeam("Summer Hunt") then
 			eventTeam.lobbyTick()
 		end
 	elseif pick == "Dungeon" then
@@ -9628,6 +9099,9 @@ function lobbyPlan.refreshUi()
 		{ "merchantLabel", hub.settings.autoMerchant and lobbyPlan.merchantState or "Off" },
 		{ "mansionLabel", hub.settings.autoMansion and lobbyPlan.mansionState or "Off" },
 		{ "portalLabel", hub.settings.autoNextPortal and hub.portal.state or "Off" },
+		{ "summerLabel", hub.settings.autoSummerHunt and eventTeam.state or "Off" },
+		{ "summerShopLabel", (hub.settings.summerClaimBingo or hub.settings.summerBuyStars) and eventTeam.shopState or "Off" },
+		{ "summerProgressLabel", eventTeam.progressText() },
 		{ "priorityLabel", lobbyPlan.current and ("Now: " .. lobbyPlan.current) or "Idle" },
 	}
 	for _, pair in ipairs(texts) do
@@ -10366,8 +9840,10 @@ local function mainTick()
 			end
 		end
 		local action = hub.settings.afterFinish
-		if hub.settings.autoFoolsHunt and not eventTeam.party() and eventTeam.bugOn() and autoPlay.levelMode() == "Fool's Hunt" then
-			action = "Back To Lobby"
+		if hub.finishedAt and hub.settings.autoSummerHunt and not eventTeam.party() and autoPlay.levelMode() == "Summer Hunt" then
+			if action ~= "Replay" or not eventTeam.levelAllowed() then
+				action = "Back To Lobby"
+			end
 		end
 		if started and not lobbyPlan.counted and autoPlay.levelMode() == "Challenge" then
 			lobbyPlan.counted = true
@@ -11020,7 +10496,7 @@ local function buildUi()
 
 	local group = window:TabGroup()
 	local stageTab = group:Tab({ Name = "Main", Image = "rbxassetid://10723407389" })
-	local aprilTab = group:Tab({ Name = "April", Image = "rbxassetid://10747363809" })
+	local summerTab = group:Tab({ Name = "Summer", Image = "rbxassetid://10747363809" })
 	local macroTab = group:Tab({ Name = "Macro", Image = "rbxassetid://10734897250" })
 	local autoPlayTab = group:Tab({ Name = "Auto Play", Image = "rbxassetid://92980588705520" })
 	local teamTab = group:Tab({ Name = "Team", Image = "rbxassetid://137726256442333" })
@@ -11118,58 +10594,75 @@ local function buildUi()
 		end,
 	})
 
-	local aprilLeft = aprilTab:Section({ Side = "Left" })
-	local aprilRight = aprilTab:Section({ Side = "Right" })
+	local summerLeft = summerTab:Section({ Side = "Left" })
+	local summerRight = summerTab:Section({ Side = "Right" })
 
-	aprilLeft:Header({ Text = "Fool's Hunt" })
-	aprilLeft:Toggle({
-		Name = "Auto Fool's Hunt",
-		Default = hub.settings.autoFoolsHunt,
+	summerLeft:Header({ Text = "Summer Hunt" })
+	summerLeft:Toggle({
+		Name = "Auto Summer Hunt",
+		Default = hub.settings.autoSummerHunt,
 		Callback = function(value)
 			if not ui.suppress then
-				setFlag("autoFoolsHunt", value)
+				setFlag("autoSummerHunt", value)
 				eventTeam.nextRequest = 0
-				setStatus(value and "Auto Fool's Hunt on" or "Auto Fool's Hunt off")
+				if not value then
+					task.spawn(pcall, eventTeam.leaveQueue)
+				end
+				setStatus(value and "Auto Summer Hunt on" or "Auto Summer Hunt off")
 			end
 		end,
 	})
-	aprilLeft:Dropdown({
+	summerLeft:Dropdown({
 		Name = "Play",
 		Required = true,
 		Options = { "Solo", "Party" },
-		Default = hub.settings.foolsMode == "Party" and 2 or 1,
+		Default = hub.settings.summerMode == "Party" and 2 or 1,
 		Callback = function(value)
 			if type(value) == "string" and not ui.suppress then
-				setFlag("foolsMode", value)
+				setFlag("summerMode", value)
 				eventTeam.nextRequest = 0
 			end
 		end,
 	})
-	ui.freezeKey = hub.isMobile() and "aprilFreezeMobile" or "aprilFreeze"
-	aprilLeft:Toggle({
-		Name = "April Bug (freeze)",
-		Default = hub.settings[ui.freezeKey] == true,
+	summerLeft:Dropdown({
+		Name = "Join When",
+		Required = true,
+		Options = eventTeam.joinRules,
+		Default = table.find(eventTeam.joinRules, hub.settings.summerJoinRule) or 1,
 		Callback = function(value)
-			if not ui.suppress then
-				setFlag(ui.freezeKey, value)
+			if type(value) == "string" and not ui.suppress then
+				setFlag("summerJoinRule", value)
 			end
 		end,
 	})
-	aprilLeft:Slider({
-		Name = "Join Delay",
-		Minimum = 30,
-		Maximum = 180,
-		DisplayMethod = "Value",
-		Default = math.clamp(tonumber(hub.settings.eventFreeze) or 90, 30, 180),
+	ui.weatherOptions = {}
+	for _, id in ipairs(eventTeam.weathers) do
+		table.insert(ui.weatherOptions, eventTeam.weatherName(id))
+	end
+	summerLeft:Dropdown({
+		Name = "Skip Weathers",
+		Multi = true,
+		Required = false,
+		Options = ui.weatherOptions,
+		Default = type(hub.settings.summerSkipWeathers) == "table" and hub.settings.summerSkipWeathers or {},
 		Callback = function(value)
-			if not ui.suppress then
-				setFlag("eventFreeze", math.floor(tonumber(value) or 90))
+			if ui.suppress or type(value) ~= "table" then
+				return
 			end
+			local list = {}
+			for _, name in ipairs(ui.weatherOptions) do
+				if value[name] then
+					table.insert(list, name)
+				end
+			end
+			setFlag("summerSkipWeathers", list)
 		end,
 	})
+	summerLeft:Label({ Text = "Weather and map rotate for the whole server. Join When / Skip Weathers wait in the lobby until the rotation fits (new map helps the Bingo board, new weather helps Weather Report). After a hunt: Replay only if After Level is Replay and the rules still fit, else back to lobby. Party: wait in an event room" })
+	ui.summerLabel = summerLeft:Label({ Text = "Off" })
 
-	aprilLeft:Header({ Text = "Buff Vote" })
-	aprilLeft:Toggle({
+	summerLeft:Header({ Text = "Buff Vote" })
+	summerLeft:Toggle({
 		Name = "Auto Pick Buffs",
 		Default = hub.settings.autoRogue,
 		Callback = function(value)
@@ -11178,7 +10671,7 @@ local function buildUi()
 			end
 		end,
 	})
-	aprilLeft:Dropdown({
+	summerLeft:Dropdown({
 		Name = "Fallback",
 		Required = true,
 		Options = eventTeam.pickModes,
@@ -11189,7 +10682,7 @@ local function buildUi()
 			end
 		end,
 	})
-	aprilLeft:Dropdown({
+	summerLeft:Dropdown({
 		Name = "Tier Rule",
 		Required = true,
 		Options = eventTeam.tierRules,
@@ -11200,8 +10693,8 @@ local function buildUi()
 			end
 		end,
 	})
-	aprilLeft:Label({ Text = "Top Priority item sets buff or debuff side; other side only if nothing fits" })
-	local avoidDropdown = aprilLeft:Dropdown({
+	summerLeft:Label({ Text = "Top Priority item sets buff or debuff side; other side only if nothing fits. Debuffs raise the Summer Pearl multiplier. Weather picks (with an emoji) are learned when seen" })
+	ui.avoidDropdown = summerLeft:Dropdown({
 		Name = "Never Pick",
 		Multi = true,
 		Required = false,
@@ -11221,144 +10714,48 @@ local function buildUi()
 			setFlag("rogueAvoid", list)
 		end,
 	})
-	ui.lastPickLabel = aprilLeft:Label({ Text = "Last pick: none" })
+	ui.lastPickLabel = summerLeft:Label({ Text = "Last pick: none" })
 
-	aprilLeft:Header({ Text = "Powers" })
-	aprilLeft:Toggle({
-		Name = "Auto Use Powers",
-		Default = hub.settings.aprilPowersOn,
+	summerRight:Header({ Text = "Rewards" })
+	summerRight:Toggle({
+		Name = "Auto Claim Bingo",
+		Default = hub.settings.summerClaimBingo,
 		Callback = function(value)
 			if not ui.suppress then
-				setFlag("aprilPowersOn", value)
+				setFlag("summerClaimBingo", value)
+				eventTeam.nextClaim = 0
 			end
 		end,
 	})
-	ui.focusMap = {}
-	ui.focusOptions = function()
-		local labels = {}
-		ui.focusMap = {}
-		for _, id in ipairs(eventTeam.powers.focusPool()) do
-			local label = unitName(id)
-			if ui.focusMap[label] and ui.focusMap[label] ~= id then
-				label = label .. " (" .. id .. ")"
-			end
-			ui.focusMap[label] = id
-			table.insert(labels, label)
-		end
-		table.sort(labels)
-		return labels
-	end
-	ui.focusSelected = function(key)
-		local labels = {}
-		local saved = hub.settings[key or "aprilFocus"]
-		for label, id in pairs(ui.focusMap) do
-			if table.find(type(saved) == "table" and saved or {}, id) then
-				table.insert(labels, label)
-			end
-		end
-		return labels
-	end
-	ui.focusDropdown = aprilLeft:Dropdown({
-		Name = "Focus Units",
-		Multi = true,
-		Required = false,
-		Search = true,
-		Options = ui.focusOptions(),
-		Default = ui.focusSelected(),
+	summerRight:Toggle({
+		Name = "Auto Buy Sunny Star",
+		Default = hub.settings.summerBuyStars,
 		Callback = function(value)
-			if ui.suppress or type(value) ~= "table" then
-				return
+			if not ui.suppress then
+				setFlag("summerBuyStars", value)
+				eventTeam.nextShop = 0
 			end
-			local ids = {}
-			for label, on in pairs(value) do
-				if on and ui.focusMap[label] then
-					table.insert(ids, ui.focusMap[label])
-				end
-			end
-			table.sort(ids)
-			setFlag("aprilFocus", ids)
 		end,
 	})
-	ui.refreshFocus = function()
-		ui.suppress = true
-		pcall(function()
-			ui.focusDropdown:ClearOptions()
-			ui.focusDropdown:InsertOptions(ui.focusOptions())
-			ui.focusDropdown:UpdateSelection(ui.focusSelected())
-		end)
-		pcall(function()
-			ui.sellDropdown:ClearOptions()
-			ui.sellDropdown:InsertOptions(ui.focusOptions())
-			ui.sellDropdown:UpdateSelection(ui.focusSelected("aprilAlwaysSell"))
-		end)
-		ui.suppress = false
-	end
-	for _, kind in ipairs(eventTeam.powers.kinds) do
-		local options = eventTeam.powers.policies[kind]
-		aprilLeft:Dropdown({
-			Name = kind,
-			Required = true,
-			Options = options,
-			Default = table.find(options, eventTeam.powers.policy(kind)) or 1,
-			Callback = function(value)
-				if type(value) == "string" and not ui.suppress then
-					local policy = type(hub.settings.aprilPowerPolicy) == "table" and table.clone(hub.settings.aprilPowerPolicy) or {}
-					policy[kind] = value
-					setFlag("aprilPowerPolicy", policy)
-				end
-			end,
-		})
-	end
-	ui.powerLabel = aprilLeft:Label({ Text = "Spells: none" })
-
-	aprilRight:Header({ Text = "Smart Play" })
-	aprilRight:Slider({
-		Name = "Carry Units",
-		Minimum = 1,
-		Maximum = 8,
+	summerRight:Slider({
+		Name = "Keep Pearls",
+		Minimum = 0,
+		Maximum = 60000,
 		DisplayMethod = "Value",
-		Default = math.clamp(math.floor(tonumber(hub.settings.aprilCarryCount) or 3), 1, 8),
+		Precision = 0,
+		Default = math.clamp(math.floor(tonumber(hub.settings.summerKeepPearls) or 5000), 0, 60000),
 		Callback = function(value)
 			if not ui.suppress then
-				setFlag("aprilCarryCount", math.floor(tonumber(value) or 3))
+				setFlag("summerKeepPearls", math.clamp(math.floor(tonumber(value) or 0), 0, 60000))
 			end
 		end,
 	})
-	aprilRight:Toggle({
-		Name = "Sell Weak Units When Full",
-		Default = hub.settings.aprilSellJunk ~= false,
-		Callback = function(value)
-			if not ui.suppress then
-				setFlag("aprilSellJunk", value)
-			end
-		end,
-	})
-	ui.sellDropdown = aprilRight:Dropdown({
-		Name = "Always Sell",
-		Multi = true,
-		Required = false,
-		Search = true,
-		Options = ui.focusOptions(),
-		Default = ui.focusSelected("aprilAlwaysSell"),
-		Callback = function(value)
-			if ui.suppress or type(value) ~= "table" then
-				return
-			end
-			local ids = {}
-			for label, on in pairs(value) do
-				if on and ui.focusMap[label] then
-					table.insert(ids, ui.focusMap[label])
-				end
-			end
-			table.sort(ids)
-			setFlag("aprilAlwaysSell", ids)
-		end,
-	})
-	aprilRight:Label({ Text = "Built in: runs by itself when the team is random (no bug). Places every unit, stacks copies for Merge, upgrades farms and the top carries only. Bug team uses your Auto Play setup" })
-	ui.carryLabel = aprilRight:Label({ Text = "Carries: none yet" })
+	summerRight:Label({ Text = "Bingo: claims every finished row, column or diagonal of the map board (2000 Pearls + 10 Star Remnants each). Sunny Star costs 150 Pearls; buys 10 at a time while Pearls stay above Keep Pearls. Lobby only" })
+	ui.summerShopLabel = summerRight:Label({ Text = "Off" })
+	ui.summerProgressLabel = summerRight:Label({ Text = "Progress: loading" })
 
-	aprilRight:Header({ Text = "Buff Priority" })
-	ui.rogueOrder = aprilRight:RankList({
+	summerRight:Header({ Text = "Buff Priority" })
+	ui.rogueOrder = summerRight:RankList({
 		Name = "Priority",
 		Options = eventTeam.pickNames(),
 		Default = eventTeam.priority(),
@@ -11368,7 +10765,7 @@ local function buildUi()
 			setFlag("roguePriority", list)
 		end,
 	})
-	aprilRight:Button({
+	summerRight:Button({
 		Name = "Clear Priority",
 		Callback = function()
 			setFlag("roguePrefer", {})
@@ -11381,9 +10778,9 @@ local function buildUi()
 	eventTeam.refreshPickers = function()
 		ui.suppress = true
 		pcall(function()
-			avoidDropdown:ClearOptions()
-			avoidDropdown:InsertOptions(eventTeam.pickNames())
-			avoidDropdown:UpdateSelection(type(hub.settings.rogueAvoid) == "table" and hub.settings.rogueAvoid or {})
+			ui.avoidDropdown:ClearOptions()
+			ui.avoidDropdown:InsertOptions(eventTeam.pickNames())
+			ui.avoidDropdown:UpdateSelection(type(hub.settings.rogueAvoid) == "table" and hub.settings.rogueAvoid or {})
 		end)
 		ui.suppress = false
 		pcall(function()
@@ -12762,11 +12159,13 @@ local function buildUi()
 			ui.autoExecLabel = nil
 			ui.rogueOrder = nil
 			ui.lastPickLabel = nil
-			ui.powerLabel = nil
-			ui.carryLabel = nil
-			ui.refreshFocus = nil
-			ui.focusDropdown = nil
-			ui.sellDropdown = nil
+			ui.summerLabel = nil
+			ui.summerShopLabel = nil
+			ui.summerProgressLabel = nil
+			ui.avoidDropdown = nil
+			lobbyPlan.summerLabel = nil
+			lobbyPlan.summerShopLabel = nil
+			lobbyPlan.summerProgressLabel = nil
 			lobbyPlan.challengeLabel = nil
 			lobbyPlan.priorityLabel = nil
 			lobbyPlan.merchantLabel = nil
@@ -12840,7 +12239,6 @@ hub.api = { startRecording = startRecording, stopRecording = stopRecording, play
 	end
 end }
 loadConfig()
-hub.settings.eventArrive = 0
 saveConfig()
 buildLevels()
 genv.AnimeAdventureHandler = nil
@@ -12903,9 +12301,7 @@ spawnThread(function()
 			end
 		end
 		pcall(display.tick)
-		pcall(eventTeam.tick)
 		pcall(eventTeam.voteTick)
-		pcall(eventTeam.powers.tick)
 		if placement.resyncAt and os.clock() >= placement.resyncAt then
 			placement.resyncAt = nil
 			pcall(placement.resync)
